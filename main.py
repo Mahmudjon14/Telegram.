@@ -1,32 +1,28 @@
+import telebot
+from telebot.types import ReplyKeyboardMarkup, KeyboardButton
 
-from telegram import Update, KeyboardButton, ReplyKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-import logging
-
-# Log sozlamalari
-logging.basicConfig(level=logging.INFO)
-TOKEN = "YOUR_BOT_TOKEN"
+TOKEN = "7812379714:AAHeBy8IFoFZ60B8KRNIriSuDRYf_VlRVPs"
+bot = telebot.TeleBot(TOKEN)
 
 categories = {
     "🛠 Qurilish asboblari": ["Perforator", "Drel", "Bulgar"],
     "🏗 Og'ir texnikalar": ["Mini traktor", "Bobcat", "Ekskavator"],
 }
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    buttons = [[KeyboardButton(cat)] for cat in categories]
-    reply_markup = ReplyKeyboardMarkup(buttons, resize_keyboard=True)
-    await update.message.reply_text("Kategoriya tanlang:", reply_markup=reply_markup)
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    markup = ReplyKeyboardMarkup(resize_keyboard=True)
+    for category in categories:
+        markup.add(KeyboardButton(category))
+    bot.send_message(message.chat.id, "Kategoriya tanlang:", reply_markup=markup)
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
+@bot.message_handler(func=lambda message: True)
+def handle_message(message):
+    text = message.text
     if text in categories:
         items = categories[text]
-        await update.message.reply_text("\n".join(items))
+        bot.send_message(message.chat.id, "\n".join(items))
     else:
-        await update.message.reply_text("Iltimos, pastdagi tugmalardan birini tanlang.")
+        bot.send_message(message.chat.id, "Iltimos, pastdagi tugmalardan birini tanlang.")
 
-if __name__ == "__main__":
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.run_polling()
+bot.polling()
