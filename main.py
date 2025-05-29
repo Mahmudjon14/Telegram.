@@ -114,8 +114,8 @@ def webhook():
     else:
         return "Bot ishga tushdi!"
 
-# Webhook ni ishga tushirish
-if __name__ == "__main__":
-    bot.remove_webhook()
-    bot.set_webhook(url=WEBHOOK_URL)
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+# Webhookni o'rnatish (bir marta ishlatiladi)
+bot.remove_webhook()
+bot.set_webhook(url=WEBHOOK_URL)
+
+# ⚠️ `app.run(...)` olib tashlandi, chunki endi gunicorn ishlatiladi
