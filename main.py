@@ -19,6 +19,9 @@ CATEGORIES = [
 
 DATA_FILE = "data/products.json"
 
+# Savatcha uchun vaqtinchalik xotira (oddiy misol uchun, realda bazaga yozish yaxshiroq)
+user_carts = {}
+
 # JSON saqlash/yuklash funksiyalari
 def load_products():
     if not os.path.exists(DATA_FILE):
@@ -27,18 +30,25 @@ def load_products():
         return json.load(f)
 
 def save_products(products):
+    os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(products, f, indent=2, ensure_ascii=False)
 
-# Boshlash
-@bot.message_handler(commands=["start"])
-def start(message):
+# Boshlang‘ich menyu (kategoriyalar + qidirish + savatcha)
+def main_menu_markup(user_id):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     for cat in CATEGORIES:
         markup.add(types.KeyboardButton(cat))
-    if message.chat.id == ADMIN_ID:
-        markup.add("➕ Mahsulot qo‘shish")
-    bot.send_message(message.chat.id, "Assalomu alaykum! Kategoriya tanlang:", reply_markup=markup)
+    markup.add(types.KeyboardButton("🔍 Qidirish"))
+    markup.add(types.KeyboardButton("🛒 Savatcha"))
+    if user_id == ADMIN_ID:
+        markup.add(types.KeyboardButton("➕ Mahsulot qo‘shish"))
+    return markup
+
+@bot.message_handler(commands=["start"])
+def start(message):
+    markup = main_menu_markup(message.chat.id)
+    bot.send_message(message.chat.id, "Assalomu alaykum! Kategoriya tanlang yoki qidirish tugmasini bosing:", reply_markup=markup)
 
 # Mahsulot qo‘shish bosqichlari
 admin_states = {}
@@ -88,7 +98,7 @@ def add_product_photo(message):
     admin_states.pop(message.chat.id, None)
     admin_data.pop(message.chat.id, None)
 
-# Kategoriya tanlanganida mahsulotlarni ko‘rsatish
+# Kategoriya tanlanganida mahsulotlarni ko‘rsatish (savatchaga qo‘shish tugmasi bilan)
 @bot.message_handler(func=lambda msg: msg.text in CATEGORIES)
 def show_products(message):
     category = message.text
@@ -101,7 +111,81 @@ def show_products(message):
 
     for p in items:
         caption = f"📦 {p['name']}\n💰 {p['price']}\n📁 {p['category']}"
-        bot.send_photo(message.chat.id, p["photo"], caption=caption)
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🛒 Savatchaga qo‘shish", callback_data=f"addcart_{p['name']}"))
+        bot.send_photo(message.chat.id, p["photo"], caption=caption, reply_markup=markup)
+
+# Callback query handler (savatchaga qo‘shish va buyurtma)
+@bot.callback_query_handler(func=lambda call: True)
+def callback_handler(call):
+    data = call.data
+    user_id = call.message.chat.id
+
+    if data.startswith("addcart_"):
+        product_name = data[len("addcart_"):]
+        products = load_products()
+        product = next((p for p in products if p["name"] == product_name), None)
+        if not product:
+            bot.answer_callback_query(call.id, "Mahsulot topilmadi.")
+            return
+
+        # Savatchaga qo‘shish
+        cart = user_carts.get(user_id, [])
+        cart.append(product)
+        user_carts[user_id] = cart
+        bot.answer_callback_query(call.id, f"✅ {product_name} savatchaga qo‘shildi.")
+
+    elif data == "order_confirm":
+        cart = user_carts.get(user_id, [])
+        if not cart:
+            bot.answer_callback_query(call.id, "Savatchingiz bo‘sh.")
+            return
+
+        order_text = f"📋 Yangi buyurtma:\n\n"
+        for idx, p in enumerate(cart, 1):
+            order_text += f"{idx}. {p['name']} — {p['price']}\n"
+
+        order_text += f"\nBuyurtma beruvchi: @{call.message.chat.username} (ID: {user_id})"
+        bot.send_message(ADMIN_ID, order_text)
+        bot.answer_callback_query(call.id, "Buyurtma yuborildi. Rahmat!")
+        user_carts[user_id] = []  # Savatchani tozalash
+
+# "🔍 Qidirish" bosilganda mahsulot nomi uchun matn so‘rash
+@bot.message_handler(func=lambda msg: msg.text == "🔍 Qidirish")
+def search_start(message):
+    bot.send_message(message.chat.id, "Qidiriladigan mahsulot nomini kiriting:")
+    bot.register_next_step_handler(message, process_search)
+
+def process_search(message):
+    query = message.text.lower()
+    products = load_products()
+    found = [p for p in products if query in p["name"].lower()]
+
+    if not found:
+        bot.send_message(message.chat.id, "Hech qanday mahsulot topilmadi.")
+        return
+
+    for p in found:
+        caption = f"📦 {p['name']}\n💰 {p['price']}\n📁 {p['category']}"
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🛒 Savatchaga qo‘shish", callback_data=f"addcart_{p['name']}"))
+        bot.send_photo(message.chat.id, p["photo"], caption=caption, reply_markup=markup)
+
+# "🛒 Savatcha" ko‘rsatish
+@bot.message_handler(func=lambda msg: msg.text == "🛒 Savatcha")
+def show_cart(message):
+    cart = user_carts.get(message.chat.id, [])
+    if not cart:
+        bot.send_message(message.chat.id, "Savatchingiz bo‘sh.")
+        return
+
+    text = "🛒 Savatchangizdagi mahsulotlar:\n\n"
+    for idx, p in enumerate(cart, 1):
+        text += f"{idx}. {p['name']} — {p['price']}\n"
+
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("✅ Buyurtma berish", callback_data="order_confirm"))
+    bot.send_message(message.chat.id, text, reply_markup=markup)
 
 # Webhook bilan Flask server
 @app.route('/', methods=["GET", "POST"])
@@ -114,8 +198,8 @@ def webhook():
     else:
         return "Bot ishga tushdi!"
 
-# Webhookni o'rnatish (bir marta ishlatiladi)
-bot.remove_webhook()
-bot.set_webhook(url=WEBHOOK_URL)
-
-# ⚠️ `app.run(...)` olib tashlandi, chunki endi gunicorn ishlatiladi
+# Webhook ni ishga tushirish
+if __name__ == "__main__":
+    bot.remove_webhook()
+    bot.set_webhook(url=WEBHOOK_URL)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
